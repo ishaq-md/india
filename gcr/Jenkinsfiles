@@ -1,0 +1,93 @@
+pipeline {
+    agent any
+    tools
+    {
+       maven "Maven.3.6.3"
+    }
+
+    environment {
+    SVC_ACCOUNT_KEY = credentials('terraform-auth')
+  }
+     
+    stages {
+        stage ('checkout'){
+            steps {
+                git branch: 'master', url: 'https://github.com/ishaqmdgcp/jar.git'
+            }
+        }
+      
+      stage('Execute Maven') {
+           steps {
+             
+                sh 'mvn clean install'           
+          }
+        }
+
+		stage('Set creds') {
+            steps {
+              
+                sh 'echo $SVC_ACCOUNT_KEY | base64 -d > ./gcr/terraform.json'
+		            sh 'pwd'
+                       
+               
+            }
+        }
+	
+	stage('Build image') {
+	 steps {
+        /* Below command specifies exactly like the command line */
+    
+        sh 'docker build -t gcr.io/midevops/javaapp2 .'
+    }
+    }
+        
+        stage('Push Image to GCR') {
+		 steps {  
+			  dir('gcr')
+			 {
+			 sh 'pwd'
+        sh 'gcloud auth activate-service-account terraform@midevops.iam.gserviceaccount.com --key-file=terraform.json'
+	sh 'gcloud auth configure-docker'
+        sh 'docker push gcr.io/midevops/javaapp2'
+			 }
+		 }
+	 }
+	 
+	 
+	stage('Create GKE cluster') {
+	 steps {
+    
+        sh 'gcloud container clusters create samples-cluster --zone us-central1-a --num-nodes=1'
+    }
+    }
+    
+    stage('Get creds from GKE cluster') {
+	 steps {
+    
+        sh 'gcloud container clusters get-credentials samples-cluster --zone us-central1-a --project midevops'
+    }
+    }
+    
+    stage('App Deploy') {
+	 steps {
+	 dir('gcr')
+			 {
+        /* Below command specifies exactly like the command line */
+    
+        sh 'kubectl apply -f deployment.yaml'
+	sh 'sleep 60s'
+	
+    }
+    }
+    }
+    
+    stage('Test App Deploy') {
+	 steps {
+    
+        sh 'curl http://35.225.234.219:8080/health'
+	
+    
+    }
+    }
+   }
+}
